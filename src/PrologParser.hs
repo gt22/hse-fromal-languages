@@ -56,7 +56,7 @@ mulpar a = parented a <|> a
 abody :: Parser [Either Atom String]
 abody =
   ( do
-      h <- (Left <$> (parented (mulpar atom) <|> (pureAtom <$> identifier))) <|> (Right <$> var)
+      h <- (Left <$> (parented (mulpar atom) <|> parseList <|> (pureAtom <$> identifier))) <|> (Right <$> var)
       t <- spaced abody
       return $ h : t
   )
@@ -67,6 +67,28 @@ atom = do
   h <- identifier
   t <- spaced abody
   return $ Atom h t
+
+buildList :: [Either Atom String] -> Atom
+buildList = foldr (\a acc-> Atom "cons" [a, Left acc]) (Atom "nil" [])
+
+listElem :: Parser (Either Atom String)
+listElem = Left <$> (parseList <|> atom) <|> Right <$> var
+
+parseEnumList :: Parser Atom
+parseEnumList = do
+    x <- spaced $ listElem `sepBy` spaced (char ',')
+    return $ buildList x
+    
+parseConsList :: Parser Atom
+parseConsList = do 
+    h <- spaced listElem
+    spaced $ reservedOp "|"
+    b <- var
+    return $ Atom "cons" [h, Right b]
+    
+    
+parseList :: Parser Atom
+parseList = char '[' >> (try parseConsList <|> parseEnumList ) =>> char ']'
 
 parseTerm :: Parser RelationBody
 parseTerm = RAtom <$> atom <|> parented parseRelBody
@@ -81,14 +103,14 @@ parseRelBody :: Parser RelationBody
 parseRelBody = parseDisj
 
 relation :: Parser Relation
-relation = do
+relation = spaced $ do
   h <- atom
   b <- spaced $ optionMaybe $ reservedOp ":-" >> spaced parseRelBody 
   _ <- dot
   return $ Relation h b
 
 parseModule :: Parser String
-parseModule = reserved "module" >> identifier =>> dot
+parseModule = spaced $ reserved "module" >> identifier =>> dot
 
 typeBody :: Parser Type
 typeBody = parented typeExpr <|> TAtom <$> atom <|> Var <$> var
@@ -97,7 +119,7 @@ typeExpr :: Parser Type
 typeExpr = foldr1 Arrow <$> typeBody `sepBy` spaced (reservedOp "->")
 
 typ :: Parser TypeDef
-typ = do
+typ = spaced $ do
   _ <- reserved "type"
   h <- spaced identifier
   b <- spaced typeExpr =>> dot
